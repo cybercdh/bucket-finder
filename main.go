@@ -49,7 +49,7 @@ func main() {
 					matches := s3Pattern.FindAllString(body, -1)
 					for _, match := range matches {
 						if verbose {
-							color.Green.Printf("Found S3 bucket:%s in %s\n", match, r.Request.URL)
+							color.Green.Println(match, r.Request.URL)
 						} else {
 							fmt.Println(match, r.Request.URL)
 						}
