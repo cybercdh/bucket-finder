@@ -5,8 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
-	"regexp"
+	// "regexp"
 	"strings"
 	"sync"
 
@@ -16,10 +17,12 @@ import (
 
 var jobs = make(chan string, 100)
 var concurrency int
+var depth int
 var verbose bool
 
 func main() {
 	flag.IntVar(&concurrency, "c", 50, "set the concurrency level")
+	flag.IntVar(&depth, "d", 5, "set the crawling depth")
 	flag.BoolVar(&verbose, "v", false, "See more info on attempts")
 	flag.Parse()
 
@@ -31,13 +34,25 @@ func main() {
 
 			// iterate the user input
 			for job := range jobs {
-				c := colly.NewCollector()
+				c := colly.NewCollector(
+					colly.MaxDepth(depth),
+				)
 
+				// crawl all js files
 				c.OnHTML("script[src]", func(e *colly.HTMLElement) {
 					e.Request.Visit(e.Attr("src"))
 				})
 
+				// crawl all hrefs
+				c.OnHTML("a[href]", func(e *colly.HTMLElement) {
+					link := e.Attr("href")
+					if !shouldExclude(link) {
+						e.Request.Visit(link)
+					}
+				})
+
 				c.OnRequest(func(r *colly.Request) {
+					r.Headers.Set("User-Agent", RandomString(userAgentList))
 					if verbose {
 						fmt.Println("Visiting", r.URL)
 					}
@@ -45,15 +60,29 @@ func main() {
 
 				c.OnResponse(func(r *colly.Response) {
 					body := string(r.Body)
-					s3Pattern := regexp.MustCompile(`[\w\-\.]*\.s3\.?(?:[\w\-\.]+)?\.amazonaws\.com`)
-					matches := s3Pattern.FindAllString(body, -1)
-					for _, match := range matches {
-						if verbose {
-							color.Green.Println(match, r.Request.URL)
-						} else {
-							fmt.Println(match, r.Request.URL)
+
+					// iterate the regexp pattern map
+					for _, re := range patternMap {
+
+						matches := re.FindAllString(body, -1)
+
+						for _, match := range matches {
+							if verbose {
+								color.Green.Println(match, r.Request.URL)
+							} else {
+								fmt.Println(match, r.Request.URL)
+							}
 						}
 					}
+					// s3Pattern := regexp.MustCompile(`[\w\-\.]*\.s3\.?(?:[\w\-\.]+)?\.amazonaws\.com`)
+					// matches := s3Pattern.FindAllString(body, -1)
+					// for _, match := range matches {
+					// 	if verbose {
+					// 		color.Green.Println(match, r.Request.URL)
+					// 	} else {
+					// 		fmt.Println(match, r.Request.URL)
+					// 	}
+					// }
 				})
 
 				c.Visit(job)
@@ -78,7 +107,7 @@ func main() {
 		domain := scanner.Text()
 
 		if !strings.HasPrefix(domain, "http") {
-			domain = "http://" + domain
+			domain = "https://" + domain
 		}
 		jobs <- domain
 	}
@@ -89,6 +118,20 @@ func main() {
 	// wait for workers
 	close(jobs)
 	wg.Wait()
+}
+
+func RandomString(userAgentList []string) string {
+	randomIndex := rand.Intn(len(userAgentList))
+	return userAgentList[randomIndex]
+}
+
+func shouldExclude(link string) bool {
+	for _, domain := range excludedDomains {
+		if strings.Contains(link, domain) {
+			return true
+		}
+	}
+	return false
 }
 
 func print_usage() {
