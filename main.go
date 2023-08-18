@@ -74,15 +74,6 @@ func main() {
 							}
 						}
 					}
-					// s3Pattern := regexp.MustCompile(`[\w\-\.]*\.s3\.?(?:[\w\-\.]+)?\.amazonaws\.com`)
-					// matches := s3Pattern.FindAllString(body, -1)
-					// for _, match := range matches {
-					// 	if verbose {
-					// 		color.Green.Println(match, r.Request.URL)
-					// 	} else {
-					// 		fmt.Println(match, r.Request.URL)
-					// 	}
-					// }
 				})
 
 				c.Visit(job)
