@@ -14,7 +14,7 @@ or, you can use as part of your bug-bounty recon workflow, e.g.
 
 ```
 -c int
-    set the concurrency level (default 20)
+    set the concurrency level (default 50)
 
 -v  get more info on attempts
 ```
