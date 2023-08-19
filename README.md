@@ -16,6 +16,9 @@ or, you can use as part of your bug-bounty recon workflow, e.g.
 -c int
     set the concurrency level (default 50)
 
+-d int
+    set the crawling depth (default 5)
+
 -v  get more info on attempts
 ```
 
