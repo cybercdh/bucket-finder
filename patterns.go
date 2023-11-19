@@ -32,6 +32,7 @@ var excludedDomains = []string{
 	"googleapis.com",
 	"jquery.com",
 	"instagram.com",
+	"github.com",
 }
 
 // Matches bucketname.s3...amazonaws.com patterns
