@@ -19,6 +19,8 @@ var concurrency int
 var depth int
 var verbose bool
 
+var urlChain = make(map[string]string)
+
 func main() {
 	flag.IntVar(&concurrency, "c", 50, "set the concurrency level")
 	flag.IntVar(&depth, "d", 5, "set the crawling depth")
@@ -33,25 +35,36 @@ func main() {
 
 			// iterate the user input
 			for job := range jobs {
+
 				c := colly.NewCollector(
 					colly.MaxDepth(depth),
 				)
 
-				// crawl all js files
-				c.OnHTML("script[src]", func(e *colly.HTMLElement) {
-					e.Request.Visit(e.Attr("src"))
-				})
+				c.OnHTML("a[href], script[src]", func(e *colly.HTMLElement) {
+					var link string
 
-				// crawl all hrefs
-				c.OnHTML("a[href]", func(e *colly.HTMLElement) {
-					link := e.Attr("href")
-					if !shouldExclude(link) {
-						e.Request.Visit(link)
+					// parse hrefs and js src URIs
+					if href := e.Attr("href"); href != "" {
+						link = e.Request.AbsoluteURL(href)
+					} else if src := e.Attr("src"); src != "" {
+						link = e.Request.AbsoluteURL(src)
+					}
+
+					if link != "" && !shouldExclude(link) {
+						// Update context with the current URL chain
+						chain := append(e.Request.Ctx.GetAny("urlChain").([]string), link)
+						ctx := colly.NewContext()
+						ctx.Put("urlChain", chain)
+
+						// Manually create a new request with the updated context
+						c.Request("GET", link, nil, ctx, nil)
 					}
 				})
 
 				c.OnRequest(func(r *colly.Request) {
+
 					r.Headers.Set("User-Agent", RandomString(userAgentList))
+
 					if verbose {
 						fmt.Println("Visiting", r.URL)
 					}
@@ -62,20 +75,40 @@ func main() {
 
 					// iterate the regexp pattern map
 					for _, re := range patternMap {
-
 						matches := re.FindAllString(body, -1)
 
 						for _, match := range matches {
+							// Print the match (S3 bucket name) and the URL chain
 							if verbose {
-								color.Green.Println(match, r.Request.URL)
+								color.Green.Println("S3 Bucket Found:", match)
+								color.Green.Println("At URL:", r.Request.URL)
+								fmt.Println("URL Chain:")
+								if chain, ok := r.Ctx.GetAny("urlChain").([]string); ok {
+									for _, u := range chain {
+										color.Yellow.Println(u)
+									}
+								}
+								fmt.Println("------")
 							} else {
-								fmt.Println(match, r.Request.URL)
+								fmt.Println("S3 Bucket Found:", match)
+								fmt.Println("At URL:", r.Request.URL)
+								fmt.Println("URL Chain:")
+								if chain, ok := r.Ctx.GetAny("urlChain").([]string); ok {
+									for _, u := range chain {
+										fmt.Println(u)
+									}
+								}
+								fmt.Println("------")
 							}
+
 						}
 					}
 				})
 
-				c.Visit(job)
+				// Initialize the context with the starting URL
+				ctx := colly.NewContext()
+				ctx.Put("urlChain", []string{job})
+				c.Request("GET", job, nil, ctx, nil)
 			}
 		}()
 	}
