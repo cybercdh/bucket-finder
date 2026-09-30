@@ -2,6 +2,7 @@ package main
 
 import (
 	"regexp"
+	"strings"
 )
 
 var userAgentList = []string{
@@ -35,20 +36,77 @@ var excludedDomains = []string{
 	"github.com",
 }
 
-// Matches bucketname.s3...amazonaws.com patterns
-var reBucketFront = regexp.MustCompile(`^([\w\-]+)\.s3(?:-[\w-]+)?(?:\.dualstack)?(?:\.[\w-]+)?\.amazonaws\.com(?:\.cn)?$`)
+// Bucket references come in three shapes:
+//
+//	virtual-host  bucket.s3.amazonaws.com, bucket.s3.eu-west-1.amazonaws.com,
+//	              bucket.s3-website-us-east-1.amazonaws.com, bucket.s3.dualstack.<region>.amazonaws.com
+//	path-style    s3.amazonaws.com/bucket, s3-eu-west-1.amazonaws.com/bucket, s3.<region>.amazonaws.com/bucket
+//	scheme        s3://bucket/key
+//
+// The previous patterns for the first two were anchored with ^ and $ and run
+// against whole page bodies, so they could never match; only a loose fourth
+// pattern did any work, and it missed path-style and s3:// entirely. Rather
+// than one regex per shape, a loose candidate match is followed by a small
+// parser that finds the "s3*" label and takes what is in front of it (virtual
+// host) or the first path segment after it (path style).
+var (
+	reAmazonHost = regexp.MustCompile(`(?i)(?:[a-z0-9][a-z0-9.\-]*\.)?s3[a-z0-9\-]*(?:\.[a-z0-9\-]+)*\.amazonaws\.com(?:\.cn)?(?:/[a-z0-9][a-z0-9.\-_]*)?`)
+	reS3Scheme   = regexp.MustCompile(`(?i)\bs3://([a-z0-9][a-z0-9.\-]{1,61}[a-z0-9])`)
+)
 
-// Matches s3...amazonaws.com/bucketname patterns
-var reS3Front = regexp.MustCompile(`^s3(?:-[\w-]+)?(?:\.dualstack)?(?:\.[\w-]+)?\.amazonaws\.com(?:\.cn)?/([\w\-]+)$`)
+// notBucketLabels are s3* service labels whose leading labels are not buckets.
+var notBucketLabels = map[string]bool{
+	"s3-control": true, "s3-outposts": true, "s3-accesspoint": true, "s3-object-lambda": true,
+}
 
-// Matches s3://bucketname/file pattern
-var reS3Scheme = regexp.MustCompile(`^s3://([\w\-]+)/`)
+// extractBuckets returns the unique, lower-cased bucket names referenced in
+// body, in first-seen order. JavaScript-escaped slashes ("\/") are unescaped
+// first so references inside JSON and JS string literals are found too.
+func extractBuckets(body []byte) []string {
+	text := strings.ReplaceAll(string(body), `\/`, `/`)
+	var out []string
+	seen := make(map[string]bool)
+	add := func(name string) {
+		name = strings.ToLower(strings.Trim(name, "."))
+		if len(name) < 3 || len(name) > 63 || seen[name] {
+			return
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
 
-var reS3Original = regexp.MustCompile(`[\w\-\.]*\.s3\.?(?:[\w\-\.]+)?\.amazonaws\.com`)
+	for _, m := range reAmazonHost.FindAllString(text, -1) {
+		if name, ok := bucketFromAmazonRef(m); ok {
+			add(name)
+		}
+	}
+	for _, m := range reS3Scheme.FindAllStringSubmatch(text, -1) {
+		add(m[1])
+	}
+	return out
+}
 
-var patternMap = map[string]*regexp.Regexp{
-	"re1": reBucketFront,
-	"re2": reS3Front,
-	"re3": reS3Scheme,
-	"re4": reS3Original,
+// bucketFromAmazonRef parses one host[/segment] match into a bucket name.
+func bucketFromAmazonRef(ref string) (string, bool) {
+	ref = strings.ToLower(ref)
+	host, path, _ := strings.Cut(ref, "/")
+	labels := strings.Split(host, ".")
+	for i, l := range labels {
+		if !strings.HasPrefix(l, "s3") {
+			continue
+		}
+		if notBucketLabels[l] {
+			return "", false
+		}
+		if i > 0 {
+			// virtual-host style: everything before the s3 label is the bucket
+			return strings.Join(labels[:i], "."), true
+		}
+		// path style: the bucket is the first path segment
+		if path != "" {
+			return path, true
+		}
+		return "", false
+	}
+	return "", false
 }
