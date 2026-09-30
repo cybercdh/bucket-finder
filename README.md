@@ -10,6 +10,16 @@ or, you can use as part of your bug-bounty recon workflow, e.g.
 `$ assetfinder -subs-only example.com | bucket-finder`
 
 
+or a single target as an argument:
+
+`$ bucket-finder example.com`
+
+## Output
+
+One bucket name per line on stdout, de-duplicated across the whole run, so it pipes straight into other tooling. With `-v`, each hit is also explained on stderr with the URL it was found at and the chain of pages that led there.
+
+Bucket references are recognised in every shape AWS uses: virtual host (`bucket.s3.amazonaws.com`, `bucket.s3.eu-west-1.amazonaws.com`, `bucket.s3-website-us-east-1.amazonaws.com`, dualstack), path style (`s3.amazonaws.com/bucket`, `s3-eu-west-1.amazonaws.com/bucket`) and `s3://bucket`, including inside JavaScript strings with escaped slashes.
+
 ## Options
 
 ```
@@ -17,9 +27,12 @@ or, you can use as part of your bug-bounty recon workflow, e.g.
     set the concurrency level (default 50)
 
 -d int
-    set the crawling depth (default 5)
+    set the crawling depth (default 5). 1 is the page itself, 2 adds the pages it links to, and so on.
 
--v  get more info on attempts
+-external
+    follow page links to other domains as well. By default links stay on the target's own registrable domain. Script files are always fetched wherever they are hosted, since CDN bundles are where bucket references tend to hide.
+
+-v  get more info on attempts (printed to stderr)
 ```
 
 ## Install
